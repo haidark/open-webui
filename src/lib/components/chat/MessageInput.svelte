@@ -1022,6 +1022,7 @@
 					<div class={recording ? '' : 'hidden'}>
 						<VoiceRecording
 							bind:recording
+							selectedModels={selectedModelIds}
 							onCancel={async () => {
 								recording = false;
 
@@ -1029,18 +1030,42 @@
 								document.getElementById('chat-input')?.focus();
 							}}
 							onConfirm={async (data) => {
-								const { text, filename } = data;
-
 								recording = false;
 
 								await tick();
-								await insertTextAtCursor(`${text}`);
-								await tick();
-								document.getElementById('chat-input')?.focus();
 
-								if ($settings?.speechAutoSend ?? false) {
-									dispatch('submit', prompt);
+								// Check if this is direct audio upload (multimodal)
+								if (data.audio) {
+									// For multimodal audio, store the audio data and dispatch
+									const audioFile = {
+										type: 'audio',
+										url: `data:${data.audio.content_type};base64,${data.audio.data}`,
+										name: data.audio.filename || data.file.name,
+										content_type: data.audio.content_type,
+										format: data.audio.format
+									};
+									
+									// Add audio file to files array
+									files = [...files, audioFile];
+									
+									// Optionally add placeholder text
+									await insertTextAtCursor(`[Audio: ${audioFile.name}]`);
+									
+									if ($settings?.speechAutoSend ?? false) {
+										dispatch('submit', prompt);
+									}
+								} else {
+									// Traditional STT - insert transcribed text
+									const { text, filename } = data;
+									await insertTextAtCursor(`${text}`);
+									await tick();
+									
+									if ($settings?.speechAutoSend ?? false) {
+										dispatch('submit', prompt);
+									}
 								}
+
+								document.getElementById('chat-input')?.focus();
 							}}
 						/>
 					</div>

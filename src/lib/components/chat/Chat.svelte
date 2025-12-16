@@ -1880,30 +1880,51 @@
 		].filter((message) => message);
 
 		messages = messages
-			.map((message, idx, arr) => ({
-				role: message.role,
-				...((message.files?.filter((file) => file.type === 'image').length > 0 ?? false) &&
-				message.role === 'user'
-					? {
-							content: [
-								{
-									type: 'text',
-									text: message?.merged?.content ?? message.content
-								},
-								...message.files
-									.filter((file) => file.type === 'image')
-									.map((file) => ({
-										type: 'image_url',
-										image_url: {
-											url: file.url
-										}
-									}))
-							]
-						}
-					: {
-							content: message?.merged?.content ?? message.content
-						})
-			}))
+			.map((message, idx, arr) => {
+				const hasImages = message.files?.filter((file) => file.type === 'image').length > 0 ?? false;
+				const hasAudio = message.files?.filter((file) => file.type === 'audio').length > 0 ?? false;
+				const hasMultimodal = hasImages || hasAudio;
+
+				return {
+					role: message.role,
+					...(hasMultimodal && message.role === 'user'
+						? {
+								content: [
+									{
+										type: 'text',
+										text: message?.merged?.content ?? message.content
+									},
+									...message.files
+										.filter((file) => file.type === 'image')
+										.map((file) => ({
+											type: 'image_url',
+											image_url: {
+												url: file.url
+											}
+										})),
+									...message.files
+										.filter((file) => file.type === 'audio')
+										.map((file) => {
+											// Extract base64 data from data URI if present
+											let audioData = file.url;
+											if (audioData.startsWith('data:')) {
+												audioData = audioData.split(',')[1];
+											}
+											return {
+												type: 'input_audio',
+												input_audio: {
+													data: audioData,
+													format: file.format || file.content_type?.split('/')[1] || 'webm'
+												}
+											};
+										})
+								]
+							}
+						: {
+								content: message?.merged?.content ?? message.content
+							})
+				};
+			})
 			.filter((message) => message?.role === 'user' || message?.content?.trim());
 
 		const toolIds = [];

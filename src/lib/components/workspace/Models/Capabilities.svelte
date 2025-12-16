@@ -11,6 +11,10 @@
 			label: $i18n.t('Vision'),
 			description: $i18n.t('Model accepts image inputs')
 		},
+		audio_input: {
+			label: $i18n.t('Audio Input'),
+			description: $i18n.t('Model accepts direct audio inputs without transcription (e.g., Gemini with native audio support)')
+		},
 		file_upload: {
 			label: $i18n.t('File Upload'),
 			description: $i18n.t('Model accepts file inputs')
@@ -45,6 +49,7 @@
 
 	export let capabilities: {
 		vision?: boolean;
+		audio_input?: boolean;
 		file_upload?: boolean;
 		web_search?: boolean;
 		image_generation?: boolean;

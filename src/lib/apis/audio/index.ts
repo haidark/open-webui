@@ -97,6 +97,74 @@ export const transcribeAudio = async (token: string, file: File, language?: stri
 	return res;
 };
 
+export const uploadAudioFile = async (token: string, file: File) => {
+	/**
+	 * Upload audio file for direct use in multimodal models (bypasses transcription).
+	 * Returns base64-encoded audio data that can be sent directly to models like Gemini.
+	 */
+	const data = new FormData();
+	data.append('file', file);
+
+	let error = null;
+	const res = await fetch(`${AUDIO_API_BASE_URL}/upload`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: data
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
+export const uploadAudioDirect = async (token: string, file: File) => {
+	/**
+	 * Upload audio file directly for multimodal models, bypassing STT pipeline.
+	 * Returns base64-encoded audio data for direct model input.
+	 */
+	const data = new FormData();
+	data.append('file', file);
+
+	let error = null;
+	const res = await fetch(`${AUDIO_API_BASE_URL}/transcriptions/direct`, {
+		method: 'POST',
+		headers: {
+			Accept: 'application/json',
+			authorization: `Bearer ${token}`
+		},
+		body: data
+	})
+		.then(async (res) => {
+			if (!res.ok) throw await res.json();
+			return res.json();
+		})
+		.catch((err) => {
+			error = err.detail;
+			console.error(err);
+			return null;
+		});
+
+	if (error) {
+		throw error;
+	}
+
+	return res;
+};
+
 export const synthesizeOpenAISpeech = async (
 	token: string = '',
 	speaker: string = 'alloy',

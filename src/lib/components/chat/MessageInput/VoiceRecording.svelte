@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { tick, getContext, onMount, onDestroy } from 'svelte';
-	import { config, settings } from '$lib/stores';
+	import { config, settings, models } from '$lib/stores';
 	import { blobToFile, calculateSHA256, extractCurlyBraceWords } from '$lib/utils';
 
-	import { transcribeAudio } from '$lib/apis/audio';
+	import { transcribeAudio, uploadAudioDirect } from '$lib/apis/audio';
 	import XMark from '$lib/components/icons/XMark.svelte';
 
 	import dayjs from 'dayjs';
@@ -16,6 +16,7 @@
 	export let recording = false;
 	export let transcribe = true;
 	export let displayMedia = false;
+	export let selectedModels = [];
 
 	export let echoCancellation = true;
 	export let noiseSuppression = true;
@@ -149,7 +150,13 @@
 		await tick();
 		const file = blobToFile(audioBlob, `Recording-${dayjs().format('L LT')}.${ext}`);
 
-		if (transcribe) {
+		// Check if any selected model supports audio_input capability
+		const supportsAudioInput = selectedModels.some((modelId) => {
+			const model = $models.find((m) => m.id === modelId);
+			return model?.info?.meta?.capabilities?.audio_input === true;
+		});
+
+		if (transcribe && !supportsAudioInput) {
 			if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
 				// with web stt, we don't need to send the file to the server
 				return;
@@ -167,6 +174,20 @@
 			if (res) {
 				console.log(res);
 				onConfirm(res);
+			}
+		} else if (supportsAudioInput) {
+			// For models with audio_input capability, upload the audio file directly
+			const res = await uploadAudioDirect(localStorage.token, file).catch((error) => {
+				toast.error(`${error}`);
+				return null;
+			});
+
+			if (res) {
+				console.log('Direct audio upload:', res);
+				onConfirm({
+					audio: res,
+					file: file
+				});
 			}
 		} else {
 			onConfirm({

@@ -1144,6 +1144,55 @@ def split_audio(file_path, max_bytes, format="mp3", bitrate="32k"):
     return chunks
 
 
+@router.post("/upload")
+def upload_audio_file(
+    request: Request,
+    file: UploadFile = File(...),
+    user=Depends(get_verified_user),
+):
+    """
+    Upload audio file for direct use in multimodal models.
+    Returns base64-encoded audio data and metadata.
+    This endpoint does NOT transcribe - it's for models that support native audio input.
+    """
+    log.info(f"Uploading audio file for direct use: {file.filename}, content_type: {file.content_type}")
+
+    # Validate content type
+    if not file.content_type or not file.content_type.startswith(('audio/', 'video/')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an audio or video file"
+        )
+
+    try:
+        # Read the file contents
+        contents = file.file.read()
+        
+        # Encode to base64 for transmission
+        audio_base64 = base64.b64encode(contents).decode('utf-8')
+        
+        # Determine MIME type
+        mime_type = file.content_type
+        if not mime_type:
+            mime_type, _ = mimetypes.guess_type(file.filename)
+            if not mime_type:
+                mime_type = "audio/webm"  # default fallback
+        
+        return {
+            "data": audio_base64,
+            "mime_type": mime_type,
+            "filename": file.filename,
+            "size": len(contents)
+        }
+        
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error processing audio file: {str(e)}"
+        )
+
+
 @router.post("/transcriptions")
 def transcription(
     request: Request,
@@ -1368,3 +1417,58 @@ async def get_voices(request: Request, user=Depends(get_verified_user)):
             {"id": k, "name": v} for k, v in get_available_voices(request).items()
         ]
     }
+
+
+@router.post("/transcriptions/direct")
+def upload_audio_direct(
+    request: Request,
+    file: UploadFile = File(...),
+    user=Depends(get_verified_user),
+):
+    """
+    Upload audio file directly for multimodal models, bypassing STT pipeline.
+    Returns base64-encoded audio data for direct model input.
+    """
+    log.info(f"Direct audio upload: {file.filename}, content_type: {file.content_type}")
+
+    # Validate content type
+    if not file.content_type.startswith("audio/") and not file.content_type.startswith("video/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported content type. Only audio/video files are allowed for direct upload.",
+        )
+
+    try:
+        ext = file.filename.split(".")[-1]
+        id = uuid.uuid4()
+        filename = f"{id}.{ext}"
+        contents = file.file.read()
+
+        # Save file for potential later use
+        file_dir = f"{CACHE_DIR}/audio/direct_uploads"
+        os.makedirs(file_dir, exist_ok=True)
+        file_path = f"{file_dir}/{filename}"
+
+        with open(file_path, "wb") as f:
+            f.write(contents)
+
+        # Encode audio as base64 for direct model input
+        audio_base64 = base64.b64encode(contents).decode('utf-8')
+
+        log.info(f"Direct audio file saved to: {file_path}")
+
+        return {
+            "filename": filename,
+            "filepath": file_path,
+            "content_type": file.content_type,
+            "data": audio_base64,  # Base64-encoded audio data
+            "format": ext,
+            "message": "Audio file uploaded directly, bypassing STT pipeline."
+        }
+
+    except Exception as e:
+        log.exception(e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ERROR_MESSAGES.DEFAULT(e),
+        )
