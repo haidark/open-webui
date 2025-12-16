@@ -153,8 +153,12 @@
 		// Check if any selected model supports audio_input capability
 		const supportsAudioInput = selectedModels.some((modelId) => {
 			const model = $models.find((m) => m.id === modelId);
-			return model?.info?.meta?.capabilities?.audio_input === true;
+			const hasCapability = model?.info?.meta?.capabilities?.audio_input === true;
+			console.log(`[onStopHandler] Model ${modelId}: audio_input capability =`, hasCapability);
+			return hasCapability;
 		});
+
+		console.log(`[onStopHandler] Processing audio - supportsAudioInput: ${supportsAudioInput}, transcribe: ${transcribe}`);
 
 		if (transcribe && !supportsAudioInput) {
 			if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
@@ -177,13 +181,15 @@
 			}
 		} else if (supportsAudioInput) {
 			// For models with audio_input capability, upload the audio file directly
+			console.log('[onStopHandler] Uploading audio directly for multimodal model...');
 			const res = await uploadAudioDirect(localStorage.token, file).catch((error) => {
+				console.error('[onStopHandler] Upload error:', error);
 				toast.error(`${error}`);
 				return null;
 			});
 
 			if (res) {
-				console.log('Direct audio upload:', res);
+				console.log('[onStopHandler] Direct audio upload successful:', res);
 				onConfirm({
 					audio: res,
 					file: file
@@ -285,8 +291,12 @@
 	// Check if any selected model supports audio_input capability
 	const supportsAudioInput = selectedModels.some((modelId) => {
 		const model = $models.find((m) => m.id === modelId);
-		return model?.info?.meta?.capabilities?.audio_input === true;
+		const hasCapability = model?.info?.meta?.capabilities?.audio_input === true;
+		console.log(`[VoiceRecording] Model ${modelId}: audio_input capability =`, hasCapability, model?.info?.meta?.capabilities);
+		return hasCapability;
 	});
+
+	console.log(`[VoiceRecording] Starting recording - supportsAudioInput: ${supportsAudioInput}, transcribe: ${transcribe}, selectedModels:`, selectedModels);
 
 	// Skip Web STT if model supports direct audio input (multimodal)
 	if (transcribe && !supportsAudioInput) {
