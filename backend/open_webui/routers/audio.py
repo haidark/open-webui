@@ -1428,6 +1428,7 @@ def upload_audio_direct(
     """
     Upload audio file directly for multimodal models, bypassing STT pipeline.
     Returns base64-encoded audio data for direct model input.
+    Converts webm to mp3 if needed for model compatibility.
     """
     log.info(f"Direct audio upload: {file.filename}, content_type: {file.content_type}")
 
@@ -1439,28 +1440,56 @@ def upload_audio_direct(
         )
 
     try:
-        ext = file.filename.split(".")[-1]
+        ext = file.filename.split(".")[-1].lower()
         id = uuid.uuid4()
-        filename = f"{id}.{ext}"
         contents = file.file.read()
 
-        # Save file for potential later use
+        # Save original file
         file_dir = f"{CACHE_DIR}/audio/direct_uploads"
         os.makedirs(file_dir, exist_ok=True)
-        file_path = f"{file_dir}/{filename}"
+        original_path = f"{file_dir}/{id}.{ext}"
 
-        with open(file_path, "wb") as f:
+        with open(original_path, "wb") as f:
             f.write(contents)
+
+        # Convert webm to mp3 for model compatibility
+        # Most multimodal models (Gemini, etc.) don't support webm
+        if ext in ['webm', 'ogg']:
+            log.info(f"Converting {ext} to mp3 for model compatibility...")
+            try:
+                audio = AudioSegment.from_file(original_path, format=ext)
+                mp3_path = f"{file_dir}/{id}.mp3"
+                audio.export(mp3_path, format="mp3", bitrate="128k")
+                
+                # Read converted file
+                with open(mp3_path, "rb") as f:
+                    contents = f.read()
+                
+                ext = "mp3"
+                filename = f"{id}.mp3"
+                file_path = mp3_path
+                content_type = "audio/mpeg"
+                
+                log.info(f"Audio converted to mp3: {mp3_path}")
+            except Exception as e:
+                log.warning(f"Failed to convert {ext} to mp3: {e}. Using original file.")
+                filename = f"{id}.{ext}"
+                file_path = original_path
+                content_type = file.content_type
+        else:
+            filename = f"{id}.{ext}"
+            file_path = original_path
+            content_type = file.content_type
 
         # Encode audio as base64 for direct model input
         audio_base64 = base64.b64encode(contents).decode('utf-8')
 
-        log.info(f"Direct audio file saved to: {file_path}")
+        log.info(f"Direct audio file ready: {file_path}, format: {ext}")
 
         return {
             "filename": filename,
             "filepath": file_path,
-            "content_type": file.content_type,
+            "content_type": content_type,
             "data": audio_base64,  # Base64-encoded audio data
             "format": ext,
             "message": "Audio file uploaded directly, bypassing STT pipeline."
