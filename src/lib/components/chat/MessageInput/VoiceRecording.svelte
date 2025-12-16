@@ -282,11 +282,18 @@
 			return;
 		}
 
-		if (transcribe) {
-			if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
-				if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
-					// Create a SpeechRecognition object
-					speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+	// Check if any selected model supports audio_input capability
+	const supportsAudioInput = selectedModels.some((modelId) => {
+		const model = $models.find((m) => m.id === modelId);
+		return model?.info?.meta?.capabilities?.audio_input === true;
+	});
+
+	// Skip Web STT if model supports direct audio input (multimodal)
+	if (transcribe && !supportsAudioInput) {
+		if ($config.audio.stt.engine === 'web' || ($settings?.audio?.stt?.engine ?? '') === 'web') {
+			if ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window) {
+				// Create a SpeechRecognition object
+				speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
 
 					// Set continuous to true for continuous recognition
 					speechRecognition.continuous = true;
