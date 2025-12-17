@@ -1045,11 +1045,11 @@
 										format: data.audio.format
 									};
 									
-									// Add audio file to files array
+									// Add audio file to files array (no text insertion for multimodal)
 									files = [...files, audioFile];
 									
-									// Optionally add placeholder text
-									await insertTextAtCursor(`[Audio: ${audioFile.name}]`);
+									// Focus the input so user can optionally add text
+									await tick();
 									
 									if ($settings?.speechAutoSend ?? false) {
 										dispatch('submit', prompt);

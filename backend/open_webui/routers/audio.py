@@ -1465,12 +1465,15 @@ def upload_audio_direct(
                 with open(mp3_path, "rb") as f:
                     contents = f.read()
                 
+                # Delete original file after successful conversion
+                os.remove(original_path)
+                
                 ext = "mp3"
                 filename = f"{id}.mp3"
                 file_path = mp3_path
                 content_type = "audio/mpeg"
                 
-                log.info(f"Audio converted to mp3: {mp3_path}")
+                log.info(f"Audio converted to mp3 and original deleted: {mp3_path}")
             except Exception as e:
                 log.warning(f"Failed to convert {ext} to mp3: {e}. Using original file.")
                 filename = f"{id}.{ext}"
