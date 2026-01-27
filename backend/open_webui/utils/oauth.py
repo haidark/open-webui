@@ -1436,53 +1436,80 @@ class OAuthManager:
                     # Check if an existing user with the same email already exists
                     existing_user = Users.get_user_by_email(email)
                     if existing_user:
-                        raise HTTPException(400, detail=ERROR_MESSAGES.EMAIL_TAKEN)
-
-                    picture_claim = auth_manager_config.OAUTH_PICTURE_CLAIM
-                    if picture_claim:
-                        picture_url = user_data.get(
-                            picture_claim,
-                            OAUTH_PROVIDERS[provider].get("picture_url", ""),
-                        )
-                        picture_url = await self._process_picture_url(
-                            picture_url, token.get("access_token")
-                        )
+                        # Link the OAuth account to the existing user instead of raising an error
+                        # This handles the case where a user logs out and logs back in,
+                        # but their OAuth sub wasn't found (e.g., if it was cleared or changed)
+                        Users.update_user_oauth_by_id(existing_user.id, provider, sub)
+                        user = existing_user
+                        # Update role if needed (similar to the existing user flow above)
+                        determined_role = self.get_user_role(user, user_data)
+                        if user.role != determined_role:
+                            Users.update_user_role_by_id(user.id, determined_role)
+                            # Update the user object in memory as well
+                            user.role = determined_role
+                        # Update profile picture if enabled
+                        if auth_manager_config.OAUTH_UPDATE_PICTURE_ON_LOGIN:
+                            picture_claim = auth_manager_config.OAUTH_PICTURE_CLAIM
+                            if picture_claim:
+                                new_picture_url = user_data.get(
+                                    picture_claim,
+                                    OAUTH_PROVIDERS[provider].get("picture_url", ""),
+                                )
+                                processed_picture_url = await self._process_picture_url(
+                                    new_picture_url, token.get("access_token")
+                                )
+                                if processed_picture_url != user.profile_image_url:
+                                    Users.update_user_profile_image_url_by_id(
+                                        user.id, processed_picture_url
+                                    )
+                                    log.debug(f"Updated profile picture for user {user.email}")
                     else:
-                        picture_url = "/user.png"
-                    username_claim = auth_manager_config.OAUTH_USERNAME_CLAIM
+                        # No existing user found, create a new one
+                        picture_claim = auth_manager_config.OAUTH_PICTURE_CLAIM
+                        if picture_claim:
+                            picture_url = user_data.get(
+                                picture_claim,
+                                OAUTH_PROVIDERS[provider].get("picture_url", ""),
+                            )
+                            picture_url = await self._process_picture_url(
+                                picture_url, token.get("access_token")
+                            )
+                        else:
+                            picture_url = "/user.png"
+                        username_claim = auth_manager_config.OAUTH_USERNAME_CLAIM
 
-                    name = user_data.get(username_claim)
-                    if not name:
-                        log.warning("Username claim is missing, using email as name")
-                        name = email
+                        name = user_data.get(username_claim)
+                        if not name:
+                            log.warning("Username claim is missing, using email as name")
+                            name = email
 
-                    user = Auths.insert_new_auth(
-                        email=email,
-                        password=get_password_hash(
-                            str(uuid.uuid4())
-                        ),  # Random password, not used
-                        name=name,
-                        profile_image_url=picture_url,
-                        role=self.get_user_role(None, user_data),
-                        oauth=oauth_data,
-                    )
-
-                    if auth_manager_config.WEBHOOK_URL:
-                        await post_webhook(
-                            WEBUI_NAME,
-                            auth_manager_config.WEBHOOK_URL,
-                            WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
-                            {
-                                "action": "signup",
-                                "message": WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
-                                "user": user.model_dump_json(exclude_none=True),
-                            },
+                        user = Auths.insert_new_auth(
+                            email=email,
+                            password=get_password_hash(
+                                str(uuid.uuid4())
+                            ),  # Random password, not used
+                            name=name,
+                            profile_image_url=picture_url,
+                            role=self.get_user_role(None, user_data),
+                            oauth=oauth_data,
                         )
 
-                    apply_default_group_assignment(
-                        request.app.state.config.DEFAULT_GROUP_ID,
-                        user.id,
-                    )
+                        if auth_manager_config.WEBHOOK_URL:
+                            await post_webhook(
+                                WEBUI_NAME,
+                                auth_manager_config.WEBHOOK_URL,
+                                WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
+                                {
+                                    "action": "signup",
+                                    "message": WEBHOOK_MESSAGES.USER_SIGNUP(user.name),
+                                    "user": user.model_dump_json(exclude_none=True),
+                                },
+                            )
+
+                        apply_default_group_assignment(
+                            request.app.state.config.DEFAULT_GROUP_ID,
+                            user.id,
+                        )
 
                 else:
                     raise HTTPException(
