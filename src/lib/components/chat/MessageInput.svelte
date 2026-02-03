@@ -1038,7 +1038,7 @@
 								if (data.audio) {
 									// For multimodal audio, store the audio data and dispatch
 									const audioFile = {
-										type: 'audio',
+										type: 'audio',  // Ensure type is 'audio' not 'file'
 										url: `data:${data.audio.content_type};base64,${data.audio.data}`,
 										name: data.audio.filename || data.file.name,
 										content_type: data.audio.content_type,

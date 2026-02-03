@@ -1882,7 +1882,11 @@
 		messages = messages
 			.map((message, idx, arr) => {
 				const hasImages = message.files?.filter((file) => file.type === 'image').length > 0 ?? false;
-				const hasAudio = message.files?.filter((file) => file.type === 'audio').length > 0 ?? false;
+				// Check for audio by type or by content_type for uploaded files
+				const hasAudio = message.files?.filter((file) =>
+					file.type === 'audio' ||
+					file.file?.meta?.content_type?.startsWith('audio/')
+				).length > 0 ?? false;
 				const hasMultimodal = hasImages || hasAudio;
 
 				return {

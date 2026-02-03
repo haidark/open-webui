@@ -914,6 +914,27 @@ async def generate_chat_completion(
     else:
         request_url = f"{url}/chat/completions"
 
+    # Debug logging to track file attachments per message
+    log.debug("=" * 80)
+    log.debug("API Request Payload Debug:")
+    log.debug(f"Model: {payload.get('model', 'unknown')}")
+    log.debug(f"Number of messages: {len(payload.get('messages', []))}")
+    for idx, msg in enumerate(payload.get('messages', [])):
+        role = msg.get('role', 'unknown')
+        content = msg.get('content', '')
+
+        # Track different content types
+        if isinstance(content, list):
+            file_refs = [item for item in content if isinstance(item, dict) and item.get('type') in ['image_url', 'input_audio', 'audio_url']]
+            text_content = [item for item in content if isinstance(item, dict) and item.get('type') == 'text']
+            log.debug(f"  Message {idx} ({role}): {len(text_content)} text blocks, {len(file_refs)} file refs")
+            for file_ref in file_refs:
+                file_type = file_ref.get('type')
+                log.debug(f"    - {file_type}: {str(file_ref)[:100]}...")
+        else:
+            log.debug(f"  Message {idx} ({role}): text content (length: {len(str(content))})")
+    log.debug("=" * 80)
+
     payload = json.dumps(payload)
 
     r = None

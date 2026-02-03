@@ -936,7 +936,89 @@ async def chat_completion_files_handler(
     __event_emitter__ = extra_params["__event_emitter__"]
     sources = []
 
-    if files := body.get("metadata", {}).get("files", None):
+    # FIX for multi-turn file attachment issue:
+    # Only retrieve from files explicitly attached to the CURRENT message turn.
+    #
+    # Problem: When files were passed in metadata, ALL files from the entire conversation
+    # history were being used for RAG retrieval on every turn. This caused the model to
+    # see content from previous file uploads when responding to new file uploads.
+    #
+    # Solution: For conversation-scoped files (folders/knowledge base), keep using metadata.
+    # For message-scoped files (user uploads), only use files from the current turn.
+    # We distinguish these by checking if files have a "legacy" flag or are marked as conversation-level.
+
+    files_from_metadata = body.get("metadata", {}).get("files", None)
+
+    # Separate conversation-level files (folders, knowledge) from message-level files (uploads)
+    conversation_files = []
+    message_files = []
+
+    if files_from_metadata:
+        for file_item in files_from_metadata:
+            # Conversation-level files have "legacy": True or "type": "collection" or are in folders
+            if (file_item.get("legacy") or
+                file_item.get("type") == "collection" or
+                file_item.get("collection_name") or
+                file_item.get("collection_names")):
+                conversation_files.append(file_item)
+            else:
+                message_files.append(file_item)
+
+    # For message-level files, only include those referenced in the last user message
+    current_turn_files = []
+    if message_files:
+        # Check the last user message for file references
+        last_user_msg = get_last_user_message_item(body.get("messages", []))
+        if last_user_msg:
+            # Extract file IDs mentioned in the current message content
+            content = last_user_msg.get("content", "")
+            mentioned_file_ids = set()
+
+            if isinstance(content, list):
+                # Multimodal content - extract file references
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+
+                    item_type = item.get("type")
+                    if item_type == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        if "/files/" in url:
+                            # Extract file ID from URL like /api/v1/files/{id}/content
+                            parts = url.split("/files/")
+                            if len(parts) > 1:
+                                file_id = parts[1].split("/")[0]
+                                mentioned_file_ids.add(file_id)
+                    elif item_type in ["input_audio", "audio_url"]:
+                        # Audio files might have ID in the item itself
+                        if "id" in item:
+                            mentioned_file_ids.add(item["id"])
+                    elif item_type == "file":
+                        # Generic file reference
+                        if "id" in item:
+                            mentioned_file_ids.add(item["id"])
+
+            # Filter to only files mentioned in current message
+            if mentioned_file_ids:
+                current_turn_files = [
+                    f for f in message_files
+                    if f.get("id") in mentioned_file_ids
+                ]
+                log.debug(f"Filtered to {len(current_turn_files)} files from current turn (out of {len(message_files)} total)")
+            else:
+                # No file references found in content, but message_files exist
+                # This might be a legacy format or files haven't been embedded in content yet
+                # To be safe, use an empty list to avoid pulling in historical files
+                log.debug(f"No file IDs found in message content, excluding {len(message_files)} message-level files from RAG")
+                current_turn_files = []
+        else:
+            # No user message found
+            current_turn_files = []
+
+    # Combine: conversation-level files (always included) + current turn files only
+    files = conversation_files + current_turn_files
+
+    if files:
         # Check if all files are in full context mode
         all_full_context = all(item.get("context") == "full" for item in files)
 
@@ -1106,6 +1188,117 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
+
+    # Transform uploaded files into multimodal content blocks
+    if "files" in form_data and form_data.get("files"):
+        files_list = form_data.get("files", [])
+        messages = form_data.get("messages", [])
+
+        # Process the last user message
+        if messages and messages[-1].get("role") == "user":
+            last_msg = messages[-1]
+            content = last_msg.get("content", "")
+
+            # Check if we have files but empty/minimal content
+            # Handle both string content and list content
+            is_empty = False
+            if isinstance(content, str):
+                is_empty = not content or not content.strip()
+            elif isinstance(content, list):
+                # Check if list is empty or only has empty text blocks
+                if not content:
+                    is_empty = True
+                else:
+                    # Check if all text blocks are empty
+                    text_blocks = [item.get('text', '') for item in content if item.get('type') == 'text']
+                    is_empty = all(not text.strip() for text in text_blocks) if text_blocks else len(content) == 0
+            
+            if files_list and is_empty:
+                # Build multimodal content array
+                multimodal_content = []
+
+                # Process each file
+                for file_item in files_list:
+                    file_data = file_item.get("file", {})
+                    file_meta = file_data.get("meta", {})
+                    content_type = file_meta.get("content_type", "")
+                    file_path = file_data.get("path")
+
+                    # Handle audio files
+                    if content_type and content_type.startswith("audio/") and file_path:
+                        import base64
+                        import os
+
+                        try:
+                            # Read audio file and convert to base64
+                            with open(file_path, "rb") as f:
+                                audio_bytes = f.read()
+                            audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
+
+                            # Determine format from content type
+                            audio_format = content_type.split("/")[1] if "/" in content_type else "wav"
+
+                            # Add input_audio block
+                            multimodal_content.append({
+                                "type": "input_audio",
+                                "input_audio": {
+                                    "data": audio_base64,
+                                    "format": audio_format
+                                }
+                            })
+                            log.debug(f"Added audio file to multimodal content: {file_data.get('filename')} (format: {audio_format})")
+                        except Exception as e:
+                            log.error(f"Error reading audio file {file_path}: {e}")
+
+                    # Handle image files
+                    elif content_type and content_type.startswith("image/") and file_path:
+                        import base64
+
+                        try:
+                            # Read image file and convert to base64
+                            with open(file_path, "rb") as f:
+                                image_bytes = f.read()
+                            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+
+                            # Add image_url block
+                            multimodal_content.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{content_type};base64,{image_base64}"
+                                }
+                            })
+                            log.debug(f"Added image file to multimodal content: {file_data.get('filename')}")
+                        except Exception as e:
+                            log.error(f"Error reading image file {file_path}: {e}")
+
+                # If we added any multimodal content, update the message
+                if multimodal_content:
+                    # Add text block if there's any content
+                    has_text = False
+                    if isinstance(content, str):
+                        has_text = content and content.strip()
+                    elif isinstance(content, list):
+                        # Check if list has non-empty text blocks
+                        text_blocks = [item.get('text', '') for item in content if item.get('type') == 'text']
+                        has_text = any(text.strip() for text in text_blocks)
+
+                    if has_text:
+                        if isinstance(content, str):
+                            multimodal_content.insert(0, {
+                                "type": "text",
+                                "text": content
+                            })
+                        elif isinstance(content, list):
+                            # Add existing text blocks from the list
+                            for item in content:
+                                if item.get('type') == 'text' and item.get('text', '').strip():
+                                    multimodal_content.insert(0, item)
+
+                    # Update message with multimodal content
+                    messages[-1]["content"] = multimodal_content
+                    form_data["messages"] = messages
+                    log.debug(f"Transformed message to multimodal with {len(multimodal_content)} blocks")
+
 
     system_message = get_system_message(form_data.get("messages", []))
     if system_message:  # Chat Controls/User Settings
