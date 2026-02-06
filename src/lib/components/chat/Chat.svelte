@@ -1596,9 +1596,18 @@
 			}
 
 			if (lastMessage.error && !lastMessage.content) {
-				// Error in response
-				toast.error($i18n.t(`Oops! There was an error in the previous response.`));
-				return;
+				// Check if this is a guardrail error by looking at the error message content
+				const errorContent = lastMessage.error?.content || '';
+				const isGuardrailError =
+					errorContent.includes('Guardrail Triggered') ||
+					errorContent.includes('requires moderation') ||
+					(errorContent.includes('Amazon Bedrock') && errorContent.includes('flagged for'));
+
+				// Only block if it's NOT a guardrail error
+				if (!isGuardrailError) {
+					toast.error($i18n.t(`Oops! There was an error in the previous response.`));
+					return;
+				}
 			}
 		}
 
@@ -2060,27 +2069,50 @@
 		}
 
 		console.error(innerError);
+
+		// Parse error message from various possible locations
 		if ('detail' in innerError) {
 			// FastAPI error
-			toast.error(innerError.detail);
 			errorMessage = innerError.detail;
+		} else if ('content' in innerError && 'message' in innerError.content) {
+			// OpenRouter/Bedrock format
+			errorMessage = innerError.content.message;
+		} else if ('error' in innerError && 'message' in innerError.error) {
+			// OpenAI error
+			errorMessage = innerError.error.message;
 		} else if ('error' in innerError) {
-			// OpenAI error
-			if ('message' in innerError.error) {
-				toast.error(innerError.error.message);
-				errorMessage = innerError.error.message;
-			} else {
-				toast.error(innerError.error);
-				errorMessage = innerError.error;
-			}
+			// OpenAI error (no message field)
+			errorMessage = innerError.error;
 		} else if ('message' in innerError) {
-			// OpenAI error
-			toast.error(innerError.message);
+			// Generic error
 			errorMessage = innerError.message;
 		}
 
+		// Check if this is a guardrail error using production error structure
+		const isGuardrailError = (
+			// Primary: Check error code and metadata
+			(innerError?.content?.code === 403 && innerError?.content?.metadata?.reasons) ||
+			// Fallback: Check message content
+			(errorMessage && errorMessage.includes('requires moderation')) ||
+			(errorMessage && errorMessage.includes('Amazon Bedrock') && errorMessage.includes('flagged for'))
+		);
+
+		// Extract guardrail reasons if available
+		const reasons = innerError?.content?.metadata?.reasons?.join(', ') || '';
+
+		// Friendly message for guardrails, normal message for other errors
+		let displayMessage = errorMessage;
+		if (isGuardrailError) {
+			const reasonsText = reasons ? ` (${reasons})` : '';
+			displayMessage = `⚠️ **Guardrail Triggered**${reasonsText}\n\n${errorMessage}\n\n*You can continue the conversation to test further.*`;
+			toast.info($i18n.t('Guardrail triggered - conversation can continue'));
+		} else {
+			toast.error(errorMessage || $i18n.t('API error occurred'));
+		}
+
+		// Set error in message history
 		responseMessage.error = {
-			content: $i18n.t(`Uh-oh! There was an issue with the response.`) + '\n' + errorMessage
+			content: displayMessage || $i18n.t(`Uh-oh! There was an issue with the response.`)
 		};
 		responseMessage.done = true;
 
@@ -2091,6 +2123,13 @@
 		}
 
 		history.messages[responseMessage.id] = responseMessage;
+
+		// FIX: Only reset state for guardrail errors
+		if (isGuardrailError) {
+			generating = false;
+			generationController = null;
+		}
+		// For other errors, preserve existing behavior (state remains locked)
 	};
 
 	const stopResponse = async () => {
@@ -2263,6 +2302,44 @@
 			}
 		} catch (e) {
 			console.error(e);
+
+			// Check if this is a guardrail/moderation error using production error structure
+			// Error structure from OpenRouter/Bedrock:
+			// { content: { message: "...", code: 403, metadata: { reasons: [...] } } }
+			const isGuardrailError = (
+				// Primary: Check error code and metadata (most reliable)
+				(e?.content?.code === 403 && e?.content?.metadata?.reasons) ||
+				// Fallback: Check error message content
+				(e?.content?.message && e.content.message.includes('requires moderation')) ||
+				(e?.message && e.message.includes('requires moderation')) ||
+				// Additional: Check for specific Bedrock guardrail patterns
+				(e?.content?.message && e.content.message.includes('Amazon Bedrock') && e.content.message.includes('flagged for'))
+			);
+
+			// FIX: Only reset state for guardrail errors (allow continuation)
+			if (isGuardrailError) {
+				generating = false;
+				generationController = null;
+
+				// Extract detailed error message
+				const errorMessage = e?.content?.message || e?.message || String(e);
+				const reasons = e?.content?.metadata?.reasons?.join(', ') || 'unknown';
+
+				// Show friendly guardrail message in chat
+				if (mergedResponse) {
+					mergedResponse.error = {
+						content: `⚠️ **Guardrail Triggered** (${reasons})\n\n${errorMessage}\n\n*You can continue the conversation to test further.*`
+					};
+					mergedResponse.done = true;
+					history.messages[messageId] = mergedResponse;
+				}
+
+				toast.info($i18n.t('Guardrail triggered - conversation can continue'));
+			} else {
+				// For other errors, preserve existing behavior (no state reset)
+				// This maintains the current error handling for network issues, auth failures, etc.
+				throw e;
+			}
 		}
 	};
 
