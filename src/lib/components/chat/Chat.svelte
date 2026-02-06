@@ -2046,6 +2046,19 @@
 				errorMessage = $i18n.t(`Uh-oh! There was an issue with the response.`);
 			}
 
+			// Check if this is a guardrail error
+			const errorStr = typeof errorMessage === 'string' ? errorMessage : JSON.stringify(error);
+			const isGuardrailError =
+				errorStr.includes('requires moderation') ||
+				(errorStr.includes('Amazon Bedrock') && errorStr.includes('flagged for'));
+
+			// Reset generating state for guardrail errors to allow continuation
+			if (isGuardrailError) {
+				generating = false;
+				generationController = null;
+				taskIds = null;
+			}
+
 			toast.error(`${errorMessage}`);
 			responseMessage.error = {
 				content: error
@@ -2143,6 +2156,7 @@
 		if (isGuardrailError) {
 			generating = false;
 			generationController = null;
+			taskIds = null;
 		}
 		// For other errors, preserve existing behavior (state remains locked)
 	};
@@ -2335,6 +2349,7 @@
 			if (isGuardrailError) {
 				generating = false;
 				generationController = null;
+				taskIds = null;
 
 				// Extract detailed error message
 				const errorMessage = e?.content?.message || e?.message || String(e);
