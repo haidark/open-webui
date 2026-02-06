@@ -839,6 +839,12 @@
 		}
 	};
 
+	// Helper function to filter out messages that triggered guardrails
+	// These messages remain visible in the UI but are excluded from API context
+	const filterGuardrailMessages = (messages) => {
+		return messages.filter(msg => !msg.hasGuardrailError);
+	};
+
 	$: if (history) {
 		getContents();
 	} else {
@@ -1629,7 +1635,9 @@
 		messageInput?.setText('');
 		prompt = '';
 
-		const messages = createMessagesList(history, history.currentId);
+		// Filter out messages with guardrail errors from API context
+		// (they remain visible in UI but are excluded from conversation context)
+		const messages = filterGuardrailMessages(createMessagesList(history, history.currentId));
 		const _files = JSON.parse(JSON.stringify(files));
 
 		chatFiles.push(
@@ -1782,7 +1790,7 @@
 						model,
 						messages && messages.length > 0
 							? messages
-							: createMessagesList(_history, responseMessageId),
+							: filterGuardrailMessages(createMessagesList(_history, responseMessageId)),
 						_history,
 						responseMessageId,
 						_chatId
@@ -2066,6 +2074,11 @@
 
 			responseMessage.done = true;
 
+			// Mark message with guardrail error flag to filter from future API requests
+			if (isGuardrailError) {
+				responseMessage.hasGuardrailError = true;
+			}
+
 			history.messages[responseMessageId] = responseMessage;
 			history.currentId = responseMessageId;
 
@@ -2143,6 +2156,11 @@
 			content: displayMessage || $i18n.t(`Uh-oh! There was an issue with the response.`)
 		};
 		responseMessage.done = true;
+
+		// Mark message with guardrail error flag to filter from future API requests
+		if (isGuardrailError) {
+			responseMessage.hasGuardrailError = true;
+		}
 
 		if (responseMessage.statusHistory) {
 			responseMessage.statusHistory = responseMessage.statusHistory.filter(
@@ -2239,7 +2257,7 @@
 				...(suggestionPrompt
 					? {
 							messages: [
-								...createMessagesList(history, message.id),
+								...filterGuardrailMessages(createMessagesList(history, message.id)),
 								{
 									role: 'user',
 									content: suggestionPrompt
@@ -2274,7 +2292,7 @@
 			if (model) {
 				await sendMessageSocket(
 					model,
-					createMessagesList(history, responseMessage.id),
+					filterGuardrailMessages(createMessagesList(history, responseMessage.id)),
 					history,
 					responseMessage.id,
 					_chatId
@@ -2361,6 +2379,8 @@
 						content: `⚠️ **Guardrail Triggered** (${reasons})\n\n${errorMessage}\n\n*You can continue the conversation to test further.*`
 					};
 					mergedResponse.done = true;
+					// Mark message with guardrail error flag to filter from future API requests
+					mergedResponse.hasGuardrailError = true;
 					history.messages[messageId] = mergedResponse;
 				}
 
