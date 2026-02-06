@@ -1597,11 +1597,26 @@
 
 			if (lastMessage.error && !lastMessage.content) {
 				// Check if this is a guardrail error by looking at the error message content
-				const errorContent = lastMessage.error?.content || '';
+				// Error can be nested in different ways, so check all possible locations
+				let errorMessage = '';
+				const err = lastMessage.error?.content;
+
+				if (typeof err === 'string') {
+					errorMessage = err;
+				} else if (err?.message) {
+					errorMessage = err.message;
+				} else if (err?.content?.message) {
+					errorMessage = err.content.message;
+				} else if (err?.error?.message) {
+					errorMessage = err.error.message;
+				} else {
+					errorMessage = JSON.stringify(err);
+				}
+
 				const isGuardrailError =
-					errorContent.includes('Guardrail Triggered') ||
-					errorContent.includes('requires moderation') ||
-					(errorContent.includes('Amazon Bedrock') && errorContent.includes('flagged for'));
+					errorMessage.includes('Guardrail Triggered') ||
+					errorMessage.includes('requires moderation') ||
+					(errorMessage.includes('Amazon Bedrock') && errorMessage.includes('flagged for'));
 
 				// Only block if it's NOT a guardrail error
 				if (!isGuardrailError) {
