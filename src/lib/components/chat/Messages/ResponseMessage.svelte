@@ -659,7 +659,7 @@
 			</Name>
 
 			<div>
-				<div class="chat-{message.role} w-full min-w-full markdown-prose">
+				<div class="chat-{message.role} {($settings?.chatBubble ?? true) ? 'max-w-[90%] rounded-3xl px-4 py-3 bg-gray-100 dark:bg-gray-800' : 'w-full min-w-full'} markdown-prose">
 					<div>
 						{#if model?.info?.meta?.capabilities?.status_updates ?? true}
 							<StatusHistory statusHistory={message?.statusHistory} />
