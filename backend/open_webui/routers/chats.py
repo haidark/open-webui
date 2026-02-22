@@ -74,16 +74,11 @@ def get_session_user_chat_list(
 @router.delete("/", response_model=bool)
 async def delete_all_user_chats(request: Request, user=Depends(get_verified_user)):
 
-    if user.role == "user" and not has_permission(
-        user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-        )
-
-    result = Chats.delete_chats_by_user_id(user.id)
-    return result
+    # Chat deletion is disabled for all users
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Chat deletion is disabled.",
+    )
 
 
 ############################
@@ -566,31 +561,11 @@ async def send_chat_message_event_by_id(
 
 @router.delete("/{id}", response_model=bool)
 async def delete_chat_by_id(request: Request, id: str, user=Depends(get_verified_user)):
-    if user.role == "admin":
-        chat = Chats.get_chat_by_id(id)
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
-
-        result = Chats.delete_chat_by_id(id)
-
-        return result
-    else:
-        if not has_permission(
-            user.id, "chat.delete", request.app.state.config.USER_PERMISSIONS
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=ERROR_MESSAGES.ACCESS_PROHIBITED,
-            )
-
-        chat = Chats.get_chat_by_id(id)
-        for tag in chat.meta.get("tags", []):
-            if Chats.count_chats_by_tag_name_and_user_id(tag, user.id) == 1:
-                Tags.delete_tag_by_name_and_user_id(tag, user.id)
-
-        result = Chats.delete_chat_by_id_and_user_id(id, user.id)
-        return result
+    # Chat deletion is disabled for all users
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Chat deletion is disabled.",
+    )
 
 
 ############################

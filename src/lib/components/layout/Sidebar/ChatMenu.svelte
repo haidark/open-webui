@@ -38,7 +38,7 @@
 	export let cloneChatHandler: Function;
 	export let archiveChatHandler: Function;
 	export let renameHandler: Function;
-	export let deleteHandler: Function;
+	export let deleteHandler: Function | null = null;
 	export let onClose: Function;
 
 	export let chatId = '';
@@ -433,6 +433,7 @@
 				<div class="flex items-center">{$i18n.t('Archive')}</div>
 			</DropdownMenu.Item>
 
+			{#if deleteHandler}
 			<DropdownMenu.Item
 				class="flex  gap-2  items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 				on:click={() => {
@@ -442,6 +443,7 @@
 				<GarbageBin strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Delete')}</div>
 			</DropdownMenu.Item>
+			{/if}
 		</DropdownMenu.Content>
 	</div>
 </Dropdown>
