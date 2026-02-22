@@ -471,19 +471,7 @@
 			</div>
 		{:else if shiftKey && mouseOver}
 			<div class=" flex items-center self-center space-x-1.5">
-				<Tooltip content={$i18n.t('Archive')} className="flex items-center">
-					<button
-						class=" self-center dark:hover:text-white transition"
-						on:click={() => {
-							archiveChatHandler(id);
-						}}
-						type="button"
-					>
-						<ArchiveBox className="size-4  translate-y-[0.5px]" strokeWidth="2" />
-					</button>
-				</Tooltip>
-
-				<!-- Delete button disabled -->
+				<!-- Archive and Delete buttons disabled -->
 			</div>
 		{:else}
 			<div class="flex self-center z-10 items-end">
@@ -496,9 +484,7 @@
 						showShareChatModal = true;
 					}}
 					{moveChatHandler}
-					archiveChatHandler={() => {
-						archiveChatHandler(id);
-					}}
+					archiveChatHandler={null}
 					{renameHandler}
 					deleteHandler={null}
 					onClose={() => {

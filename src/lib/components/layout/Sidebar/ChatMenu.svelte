@@ -36,7 +36,7 @@
 	export let moveChatHandler: Function;
 
 	export let cloneChatHandler: Function;
-	export let archiveChatHandler: Function;
+	export let archiveChatHandler: Function | null = null;
 	export let renameHandler: Function;
 	export let deleteHandler: Function | null = null;
 	export let onClose: Function;
@@ -423,6 +423,7 @@
 				</DropdownMenu.Sub>
 			{/if}
 
+			{#if archiveChatHandler}
 			<DropdownMenu.Item
 				class="flex gap-2 items-center px-3 py-1.5 text-sm  cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl"
 				on:click={() => {
@@ -432,6 +433,7 @@
 				<ArchiveBox strokeWidth="1.5" />
 				<div class="flex items-center">{$i18n.t('Archive')}</div>
 			</DropdownMenu.Item>
+			{/if}
 
 			{#if deleteHandler}
 			<DropdownMenu.Item
