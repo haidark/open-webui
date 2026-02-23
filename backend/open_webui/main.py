@@ -1350,6 +1350,31 @@ async def inspect_websocket(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def set_cache_control_headers(request: Request, call_next):
+    response = await call_next(request)
+
+    path = request.url.path
+    content_type = (response.headers.get("content-type") or "").lower()
+
+    # Frontend build artifacts are content-addressed and safe to cache aggressively.
+    if path.startswith("/_app/immutable/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+    # Do not cache API responses or HTML shell responses.
+    if (
+        path.startswith("/api/")
+        or path.startswith("/openai/")
+        or path.startswith("/ollama/")
+        or path.startswith("/health")
+        or "text/html" in content_type
+    ):
+        response.headers["Cache-Control"] = "no-store"
+
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ALLOW_ORIGIN,
