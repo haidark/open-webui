@@ -68,7 +68,7 @@
 				</div>
 			</div>
 
-			{#if $user?.role === 'admin' || ($user?.permissions?.chat?.multiple_models ?? true)}
+			{#if false}
 				{#if selectedModelIdx === 0}
 					<div
 						class="  self-center mx-1 disabled:text-gray-600 disabled:hover:text-gray-600 -translate-y-[0.5px]"
