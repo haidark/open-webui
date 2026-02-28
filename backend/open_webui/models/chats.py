@@ -548,7 +548,14 @@ class ChatTable:
             if filter:
                 query_key = filter.get("query")
                 if query_key:
-                    query = query.filter(Chat.title.ilike(f"%{query_key}%"))
+                    from sqlalchemy import or_
+
+                    query = query.filter(
+                        or_(
+                            Chat.title.ilike(f"%{query_key}%"),
+                            Chat.id.ilike(f"%{query_key}%"),
+                        )
+                    )
 
                 order_by = filter.get("order_by")
                 direction = filter.get("direction")

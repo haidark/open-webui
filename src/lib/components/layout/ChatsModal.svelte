@@ -120,7 +120,7 @@
 					<input
 						class=" w-full text-sm pr-4 py-1 rounded-r-xl outline-hidden bg-transparent"
 						bind:value={query}
-						placeholder={$i18n.t('Search Chats')}
+						placeholder={shareUrl ? $i18n.t('Search by title or chat ID') : $i18n.t('Search Chats')}
 					/>
 
 					{#if query}
@@ -240,6 +240,11 @@
 										<div class="text-ellipsis line-clamp-1 w-full">
 											{chat?.title}
 										</div>
+										{#if shareUrl}
+											<div class="text-xs text-gray-400 dark:text-gray-500 font-mono truncate mt-0.5">
+												{chat.id}
+											</div>
+										{/if}
 									</a>
 
 									<div class="basis-2/5 flex items-center justify-end">
