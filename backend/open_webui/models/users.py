@@ -630,17 +630,12 @@ class UsersTable:
             # Remove User from Groups
             Groups.remove_user_from_all_groups(id)
 
-            # Delete User Chats
-            result = Chats.delete_chats_by_user_id(id)
-            if result:
-                with get_db() as db:
-                    # Delete User
-                    db.query(User).filter_by(id=id).delete()
-                    db.commit()
+            with get_db() as db:
+                # Delete User
+                db.query(User).filter_by(id=id).delete()
+                db.commit()
 
-                return True
-            else:
-                return False
+            return True
         except Exception:
             return False
 
