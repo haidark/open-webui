@@ -941,7 +941,7 @@
 
 							{#if message.done}
 								{#if !readOnly}
-									{#if $user?.role === 'user' ? ($user?.permissions?.chat?.edit ?? true) : true}
+									{#if false}
 										<Tooltip content={$i18n.t('Edit')} placement="bottom">
 											<button
 												aria-label={$i18n.t('Edit')}
