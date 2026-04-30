@@ -321,9 +321,13 @@ class ChatTable:
                 **message,
             }
         else:
-            history["messages"][message_id] = message
-
-        history["currentId"] = message_id
+            history.setdefault("messages", {})[message_id] = message
+            # Only advance currentId when adding a brand-new message. Updating
+            # an existing message (content delta, status, files, edit, etc.)
+            # must not rewind currentId — a stray event for an older message
+            # would otherwise truncate the visible conversation and orphan
+            # later messages in the tree.
+            history["currentId"] = message_id
 
         chat["history"] = history
         return self.update_chat_by_id(id, chat)
