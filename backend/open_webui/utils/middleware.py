@@ -29,6 +29,7 @@ from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.chats import Chats
 from open_webui.models.folders import Folders
 from open_webui.models.users import Users
+from open_webui.storage.provider import Storage
 from open_webui.socket.main import (
     get_event_call,
     get_event_emitter,
@@ -1199,21 +1200,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
             last_msg = messages[-1]
             content = last_msg.get("content", "")
 
-            # Check if we have files but empty/minimal content
-            # Handle both string content and list content
-            is_empty = False
-            if isinstance(content, str):
-                is_empty = not content or not content.strip()
-            elif isinstance(content, list):
-                # Check if list is empty or only has empty text blocks
-                if not content:
-                    is_empty = True
-                else:
-                    # Check if all text blocks are empty
-                    text_blocks = [item.get('text', '') for item in content if item.get('type') == 'text']
-                    is_empty = all(not text.strip() for text in text_blocks) if text_blocks else len(content) == 0
-            
-            if files_list and is_empty:
+            if files_list:
                 # Build multimodal content array
                 multimodal_content = []
 
@@ -1226,12 +1213,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
                     # Handle audio files
                     if content_type and content_type.startswith("audio/") and file_path:
-                        import base64
-                        import os
-
                         try:
-                            # Read audio file and convert to base64
-                            with open(file_path, "rb") as f:
+                            # Resolve to a local path (downloads from S3/GCS/Azure if needed).
+                            local_path = Storage.get_file(file_path)
+                            with open(local_path, "rb") as f:
                                 audio_bytes = f.read()
                             audio_base64 = base64.b64encode(audio_bytes).decode('utf-8')
 
@@ -1252,11 +1237,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
                     # Handle image files
                     elif content_type and content_type.startswith("image/") and file_path:
-                        import base64
-
                         try:
-                            # Read image file and convert to base64
-                            with open(file_path, "rb") as f:
+                            local_path = Storage.get_file(file_path)
+                            with open(local_path, "rb") as f:
                                 image_bytes = f.read()
                             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
