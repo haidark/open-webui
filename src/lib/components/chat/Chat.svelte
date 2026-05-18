@@ -1999,6 +1999,11 @@
 
 				files: (files?.length ?? 0) > 0 ? files : undefined,
 
+				current_turn_file_ids:
+					(userMessage?.files?.length ?? 0) > 0
+						? userMessage.files.map((f) => f.id).filter(Boolean)
+						: undefined,
+
 				filter_ids: selectedFilterIds.length > 0 ? selectedFilterIds : undefined,
 				tool_ids: toolIds.length > 0 ? toolIds : undefined,
 				tool_servers: ($toolServers ?? []).filter(

@@ -966,17 +966,16 @@ async def chat_completion_files_handler(
                 message_files.append(file_item)
 
     # For message-level files, only include those attached to the current turn.
-    # The frontend sets `files` on each message object, so the last user message's
-    # `files` array is the authoritative list of files attached to this turn —
-    # including documents (PDF/Word) that aren't embedded in the message content.
+    # The frontend (Chat.svelte) sends the current turn's file IDs in
+    # metadata.current_turn_file_ids so we can filter without depending on file
+    # IDs being embedded in the message content (which doesn't happen for
+    # document uploads like PDF/Word).
     current_turn_files = []
     if message_files:
-        last_user_msg = get_last_user_message_item(body.get("messages", []))
-        current_turn_file_ids = {
-            f.get("id")
-            for f in (last_user_msg or {}).get("files", []) or []
-            if f.get("id")
-        }
+        current_turn_file_ids = body.get("metadata", {}).get(
+            "current_turn_file_ids"
+        ) or []
+        current_turn_file_ids = set(current_turn_file_ids)
         if current_turn_file_ids:
             current_turn_files = [
                 f for f in message_files if f.get("id") in current_turn_file_ids
@@ -986,7 +985,7 @@ async def chat_completion_files_handler(
             )
         else:
             log.debug(
-                f"Last user message has no attached files, excluding {len(message_files)} message-level files from RAG"
+                f"No current_turn_file_ids on request, excluding {len(message_files)} message-level files from RAG"
             )
 
     # Combine: conversation-level files (always included) + current turn files only
@@ -1461,10 +1460,16 @@ async def process_chat_payload(request, form_data, user, metadata, model):
         # Remove duplicate files based on their content
         files = list({json.dumps(f, sort_keys=True): f for f in files}.values())
 
+    # Per-turn file IDs sent by the frontend (Chat.svelte). Used by
+    # chat_completion_files_handler to scope RAG retrieval to the current turn
+    # and avoid leaking files from earlier turns.
+    current_turn_file_ids = form_data.pop("current_turn_file_ids", None)
+
     metadata = {
         **metadata,
         "tool_ids": tool_ids,
         "files": files,
+        "current_turn_file_ids": current_turn_file_ids,
     }
     form_data["metadata"] = metadata
 
