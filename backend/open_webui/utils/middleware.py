@@ -965,56 +965,29 @@ async def chat_completion_files_handler(
             else:
                 message_files.append(file_item)
 
-    # For message-level files, only include those referenced in the last user message
+    # For message-level files, only include those attached to the current turn.
+    # The frontend sets `files` on each message object, so the last user message's
+    # `files` array is the authoritative list of files attached to this turn —
+    # including documents (PDF/Word) that aren't embedded in the message content.
     current_turn_files = []
     if message_files:
-        # Check the last user message for file references
         last_user_msg = get_last_user_message_item(body.get("messages", []))
-        if last_user_msg:
-            # Extract file IDs mentioned in the current message content
-            content = last_user_msg.get("content", "")
-            mentioned_file_ids = set()
-
-            if isinstance(content, list):
-                # Multimodal content - extract file references
-                for item in content:
-                    if not isinstance(item, dict):
-                        continue
-
-                    item_type = item.get("type")
-                    if item_type == "image_url":
-                        url = item.get("image_url", {}).get("url", "")
-                        if "/files/" in url:
-                            # Extract file ID from URL like /api/v1/files/{id}/content
-                            parts = url.split("/files/")
-                            if len(parts) > 1:
-                                file_id = parts[1].split("/")[0]
-                                mentioned_file_ids.add(file_id)
-                    elif item_type in ["input_audio", "audio_url"]:
-                        # Audio files might have ID in the item itself
-                        if "id" in item:
-                            mentioned_file_ids.add(item["id"])
-                    elif item_type == "file":
-                        # Generic file reference
-                        if "id" in item:
-                            mentioned_file_ids.add(item["id"])
-
-            # Filter to only files mentioned in current message
-            if mentioned_file_ids:
-                current_turn_files = [
-                    f for f in message_files
-                    if f.get("id") in mentioned_file_ids
-                ]
-                log.debug(f"Filtered to {len(current_turn_files)} files from current turn (out of {len(message_files)} total)")
-            else:
-                # No file references found in content, but message_files exist
-                # This might be a legacy format or files haven't been embedded in content yet
-                # To be safe, use an empty list to avoid pulling in historical files
-                log.debug(f"No file IDs found in message content, excluding {len(message_files)} message-level files from RAG")
-                current_turn_files = []
+        current_turn_file_ids = {
+            f.get("id")
+            for f in (last_user_msg or {}).get("files", []) or []
+            if f.get("id")
+        }
+        if current_turn_file_ids:
+            current_turn_files = [
+                f for f in message_files if f.get("id") in current_turn_file_ids
+            ]
+            log.debug(
+                f"Filtered to {len(current_turn_files)} files from current turn (out of {len(message_files)} total)"
+            )
         else:
-            # No user message found
-            current_turn_files = []
+            log.debug(
+                f"Last user message has no attached files, excluding {len(message_files)} message-level files from RAG"
+            )
 
     # Combine: conversation-level files (always included) + current turn files only
     files = conversation_files + current_turn_files
