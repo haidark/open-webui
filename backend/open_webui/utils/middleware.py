@@ -1162,7 +1162,10 @@ async def process_chat_payload(request, form_data, user, metadata, model):
     form_data = apply_params_to_form_data(form_data, model)
     log.debug(f"form_data: {form_data}")
 
-    # Transform uploaded files into multimodal content blocks
+    # Transform uploaded files into multimodal content blocks. Anything we
+    # attach inline here gets recorded in `attached_file_ids` so we can pull
+    # those IDs out of metadata.files below and skip the RAG path for them.
+    attached_file_ids: set[str] = set()
     if "files" in form_data and form_data.get("files"):
         files_list = form_data.get("files", [])
         messages = form_data.get("messages", [])
@@ -1182,6 +1185,14 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                     file_meta = file_data.get("meta", {})
                     content_type = file_meta.get("content_type", "")
                     file_path = file_data.get("path")
+                    file_id = file_item.get("id") or file_data.get("id")
+                    filename = (
+                        file_data.get("filename")
+                        or file_item.get("name")
+                        or file_meta.get("name")
+                        or "file"
+                    )
+                    converted_pdf_path = file_meta.get("converted_pdf_path")
 
                     # Handle audio files
                     if content_type and content_type.startswith("audio/") and file_path:
@@ -1203,7 +1214,9 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                                     "format": audio_format
                                 }
                             })
-                            log.debug(f"Added audio file to multimodal content: {file_data.get('filename')} (format: {audio_format})")
+                            if file_id:
+                                attached_file_ids.add(file_id)
+                            log.debug(f"Added audio file to multimodal content: {filename} (format: {audio_format})")
                         except Exception as e:
                             log.error(f"Error reading audio file {file_path}: {e}")
 
@@ -1222,9 +1235,55 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                                     "url": f"data:{content_type};base64,{image_base64}"
                                 }
                             })
-                            log.debug(f"Added image file to multimodal content: {file_data.get('filename')}")
+                            if file_id:
+                                attached_file_ids.add(file_id)
+                            log.debug(f"Added image file to multimodal content: {filename}")
                         except Exception as e:
                             log.error(f"Error reading image file {file_path}: {e}")
+
+                    # Native PDF, or office document that was converted to PDF at upload time
+                    elif (content_type == "application/pdf" and file_path) or converted_pdf_path:
+                        pdf_source = converted_pdf_path or file_path
+                        try:
+                            local_path = Storage.get_file(pdf_source)
+                            with open(local_path, "rb") as f:
+                                pdf_bytes = f.read()
+                            pdf_base64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                            pdf_filename = filename
+                            if converted_pdf_path and not pdf_filename.lower().endswith(".pdf"):
+                                pdf_filename = f"{os.path.splitext(pdf_filename)[0]}.pdf"
+                            multimodal_content.append({
+                                "type": "file",
+                                "file": {
+                                    "filename": pdf_filename,
+                                    "file_data": f"data:application/pdf;base64,{pdf_base64}",
+                                },
+                            })
+                            if file_id:
+                                attached_file_ids.add(file_id)
+                            log.debug(
+                                f"Added PDF file to multimodal content: {pdf_filename} (converted={bool(converted_pdf_path)})"
+                            )
+                        except Exception as e:
+                            log.error(f"Error reading PDF file {pdf_source}: {e}")
+
+                    # Everything else: inline pre-extracted text content if we have it
+                    else:
+                        extracted_text = (file_data.get("data") or {}).get("content")
+                        if extracted_text and extracted_text.strip():
+                            multimodal_content.append({
+                                "type": "text",
+                                "text": (
+                                    f'<document name="{filename}">\n'
+                                    f"{extracted_text}\n"
+                                    f"</document>"
+                                ),
+                            })
+                            if file_id:
+                                attached_file_ids.add(file_id)
+                            log.debug(
+                                f"Inlined extracted text from {filename} ({len(extracted_text)} chars)"
+                            )
 
                 # If we added any multimodal content, update the message
                 if multimodal_content:
@@ -1435,6 +1494,12 @@ async def process_chat_payload(request, form_data, user, metadata, model):
 
     tool_ids = form_data.pop("tool_ids", None)
     files = form_data.pop("files", None)
+
+    # Drop any files we already attached natively above so the RAG handler
+    # doesn't also pull retrieved chunks for them (the model already has the
+    # full document via the multimodal payload).
+    if files and attached_file_ids:
+        files = [f for f in files if f.get("id") not in attached_file_ids]
 
     prompt = get_last_user_message(form_data["messages"])
     # TODO: re-enable URL extraction from prompt

@@ -1,5 +1,6 @@
 import logging
 import os
+import tempfile
 import uuid
 import json
 from fnmatch import fnmatch
@@ -47,6 +48,11 @@ from open_webui.storage.provider import Storage
 
 from open_webui.utils.auth import get_admin_user, get_verified_user
 from open_webui.utils.access_control import has_access
+from open_webui.utils.document_conversion import (
+    CONVERTIBLE_EXTENSIONS,
+    convert_to_pdf,
+    is_convertible,
+)
 
 from pydantic import BaseModel
 
@@ -227,6 +233,41 @@ def upload_file_handler(
             },
         )
 
+        # Convert office documents to PDF at upload time so chat-time payload
+        # assembly can attach them natively without re-converting each turn.
+        converted_pdf_path = None
+        if is_convertible(file_extension):
+            try:
+                local_source = Storage.get_file(file_path)
+                pdf_bytes = convert_to_pdf(local_source)
+                converted_filename = f"{id}_converted.pdf"
+                with tempfile.NamedTemporaryFile(
+                    suffix=".pdf", delete=False
+                ) as tmp:
+                    tmp.write(pdf_bytes)
+                    tmp_path = tmp.name
+                try:
+                    with open(tmp_path, "rb") as f:
+                        _, converted_pdf_path = Storage.upload_file(
+                            f,
+                            converted_filename,
+                            {
+                                "OpenWebUI-User-Email": user.email,
+                                "OpenWebUI-User-Id": user.id,
+                                "OpenWebUI-User-Name": user.name,
+                                "OpenWebUI-File-Id": id,
+                                "OpenWebUI-Converted-From": file_extension,
+                            },
+                        )
+                finally:
+                    os.unlink(tmp_path)
+                log.info(
+                    f"Converted {file_extension} upload {id} to PDF at {converted_pdf_path}"
+                )
+            except Exception as e:
+                log.error(f"Failed to convert {file_extension} upload {id} to PDF: {e}")
+                converted_pdf_path = None
+
         file_item = Files.insert_new_file(
             user.id,
             FileForm(
@@ -242,6 +283,11 @@ def upload_file_handler(
                         "content_type": file.content_type,
                         "size": len(contents),
                         "data": file_metadata,
+                        **(
+                            {"converted_pdf_path": converted_pdf_path}
+                            if converted_pdf_path
+                            else {}
+                        ),
                     },
                 }
             ),

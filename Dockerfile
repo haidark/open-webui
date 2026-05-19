@@ -116,12 +116,15 @@ RUN echo -n 00000000-0000-0000-0000-000000000000 > $HOME/.cache/chroma/telemetry
 # Make sure the user has access to the app and root directory
 RUN chown -R $UID:$GID /app $HOME
 
-# Install common system dependencies
+# Install common system dependencies. libreoffice-core/writer/calc/impress let
+# us convert office documents to PDF at upload time so we can attach them
+# natively to multimodal models (see utils/document_conversion.py).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     git build-essential pandoc gcc netcat-openbsd curl jq \
     python3-dev \
     ffmpeg libsm6 libxext6 \
+    libreoffice-core libreoffice-writer libreoffice-calc libreoffice-impress \
     && rm -rf /var/lib/apt/lists/*
 
 # install python dependencies
