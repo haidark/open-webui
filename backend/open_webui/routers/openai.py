@@ -39,6 +39,7 @@ from open_webui.env import SRC_LOG_LEVELS
 
 
 from open_webui.utils.payload import (
+    apply_anthropic_cache_control,
     apply_model_params_to_body_openai,
     apply_system_prompt_to_body,
 )
@@ -934,6 +935,11 @@ async def generate_chat_completion(
         else:
             log.debug(f"  Message {idx} ({role}): text content (length: {len(str(content))})")
     log.debug("=" * 80)
+
+    # Anthropic caching via OpenRouter is opt-in: add ephemeral cache breakpoints
+    # so Claude reuses the stable prefix instead of re-billing it every turn.
+    if "openrouter.ai" in url:
+        payload = apply_anthropic_cache_control(payload)
 
     payload = json.dumps(payload)
 

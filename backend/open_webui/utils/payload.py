@@ -42,6 +42,71 @@ def apply_system_prompt_to_body(
 
 
 # inplace function: form_data is modified
+def apply_anthropic_cache_control(form_data: dict) -> dict:
+    """Add Anthropic prompt-cache breakpoints for OpenRouter requests.
+
+    OpenRouter caches OpenAI/xAI prompts automatically, but Anthropic caching is
+    opt-in: it only happens when messages carry explicit
+    ``cache_control: {"type": "ephemeral"}`` breakpoints. Without them Claude
+    never caches, so the large stable prefix (system prompt + prior turns) is
+    re-billed in full on every turn.
+
+    We place breakpoints on the system message and the last two non-system
+    messages. The first caches the static instruction block; the trailing two
+    let each turn reuse the previous turn's cached prefix as the conversation
+    grows. Anthropic allows up to 4 breakpoints and silently ignores ones on
+    prefixes below the minimum cacheable size, so this is safe to always apply.
+    """
+    model = (form_data.get("model") or "").lower()
+    if not model.startswith("anthropic/"):
+        return form_data
+
+    messages = form_data.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return form_data
+
+    def mark(message: dict) -> None:
+        content = message.get("content")
+        if isinstance(content, str):
+            if not content:
+                return
+            message["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        elif isinstance(content, list) and content:
+            # Attach to the last dict part so the whole message is cacheable.
+            for part in reversed(content):
+                if isinstance(part, dict):
+                    part["cache_control"] = {"type": "ephemeral"}
+                    return
+
+    marked_ids = set()
+
+    # System message (usually the first message).
+    for message in messages:
+        if message.get("role") == "system":
+            mark(message)
+            marked_ids.add(id(message))
+            break
+
+    # Last two non-system messages cover the growing prefix across turns.
+    trailing = 0
+    for message in reversed(messages):
+        if trailing >= 2:
+            break
+        if message.get("role") == "system" or id(message) in marked_ids:
+            continue
+        mark(message)
+        trailing += 1
+
+    return form_data
+
+
+# inplace function: form_data is modified
 def apply_model_params_to_body(
     params: dict, form_data: dict, mappings: dict[str, Callable]
 ) -> dict:
