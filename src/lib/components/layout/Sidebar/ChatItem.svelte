@@ -486,7 +486,9 @@
 					{moveChatHandler}
 					archiveChatHandler={null}
 					{renameHandler}
-					deleteHandler={null}
+					deleteHandler={() => {
+						showDeleteConfirm = true;
+					}}
 					onClose={() => {
 						dispatch('unselect');
 					}}
