@@ -27,6 +27,7 @@ from starlette.responses import Response, StreamingResponse, JSONResponse
 from open_webui.utils.misc import is_string_allowed
 from open_webui.models.oauth_sessions import OAuthSessions
 from open_webui.models.chats import Chats
+from open_webui.models.files import Files
 from open_webui.models.folders import Folders
 from open_webui.models.users import Users
 from open_webui.storage.provider import Storage
@@ -1182,6 +1183,26 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 # Process each file
                 for file_item in files_list:
                     file_data = file_item.get("file", {})
+
+                    # The frontend usually sends a bare file reference
+                    # ({id, name, size, ...}) with no nested record, so the
+                    # branches below (which need meta.content_type, path, and
+                    # extracted data.content) can't fire and the file silently
+                    # falls back to RAG. Re-hydrate the full record from the DB
+                    # so uploaded documents actually reach the model in full.
+                    if not file_data.get("data") and not file_data.get("meta"):
+                        ref_id = file_item.get("id") or file_data.get("id")
+                        if ref_id:
+                            db_file = Files.get_file_by_id(ref_id)
+                            if db_file:
+                                file_data = {
+                                    "id": db_file.id,
+                                    "filename": db_file.filename,
+                                    "path": db_file.path,
+                                    "data": db_file.data or {},
+                                    "meta": db_file.meta or {},
+                                }
+
                     file_meta = file_data.get("meta", {})
                     content_type = file_meta.get("content_type", "")
                     file_path = file_data.get("path")
