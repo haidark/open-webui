@@ -501,6 +501,12 @@ async def get_filtered_models(models, user):
 @cached(
     ttl=MODELS_CACHE_TTL,
     key=lambda _, user: f"openai_all_models_{user.id}" if user else "openai_all_models",
+    # Never cache an empty model list. If every connection transiently fails,
+    # caching {"data": []} would leave users with an empty model picker for the
+    # full TTL; skipping the cache lets the next request retry immediately.
+    skip_cache_func=lambda result: not (
+        isinstance(result, dict) and result.get("data")
+    ),
 )
 async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
     log.info("get_all_models()")
