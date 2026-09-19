@@ -76,7 +76,7 @@ ENV OLLAMA_BASE_URL="/ollama" \
 # users' model pickers. Cache longer and fail a dead connection fast (the
 # last-known-good fallback in routers/openai.py covers the rest).
 ENV MODELS_CACHE_TTL="60" \
-    AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST="5"
+    AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST="10"
 
 ## API Key and Security Config ##
 ENV OPENAI_API_KEY="" \

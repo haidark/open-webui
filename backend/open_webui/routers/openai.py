@@ -84,7 +84,7 @@ async def send_get_request(url, key=None, user: UserModel = None):
                 return await response.json()
     except Exception as e:
         # Handle connection error here
-        log.error(f"Connection error: {e}")
+        log.error(f"Connection error for {url}: {e}")
         return None
 
 
@@ -351,6 +351,20 @@ async def speech(request: Request, user=Depends(get_verified_user)):
 LAST_GOOD_MODEL_LIST_RESPONSES: dict = {}
 
 
+def _model_list_response_has_models(response) -> bool:
+    """True only if a /models response actually carries models.
+
+    send_get_request returns None on a connection error, but a provider may also
+    return a truthy *error* payload (e.g. {"error": ...}) or an empty list. Those
+    must not be treated as a good response to cache or to serve as fallback.
+    """
+    if isinstance(response, dict):
+        return bool(response.get("data"))
+    if isinstance(response, list):
+        return len(response) > 0
+    return False
+
+
 async def get_all_models_responses(request: Request, user: UserModel) -> list:
     if not request.app.state.config.ENABLE_OPENAI_API:
         return []
@@ -423,10 +437,11 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
 
     responses = await asyncio.gather(*request_tasks)
 
-    # Resilience: if an enabled connection failed this round (send_get_request
-    # returned None on a timeout/connection error), serve its last-known-good
-    # model list instead of dropping its models. Disabled connections also yield
-    # None, so only fall back for connections that are actually enabled.
+    # Resilience: if an enabled connection returned no models this round (a
+    # timeout/connection error -> None, or an error/empty payload), serve its
+    # last-known-good model list instead of dropping its models. Only cache and
+    # fall back on responses that actually carry models, and only for connections
+    # that are enabled (disabled ones intentionally yield None).
     for idx, response in enumerate(responses):
         url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
         api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
@@ -435,12 +450,12 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
         )
         enabled = api_config.get("enable", True)
 
-        if response:
+        if _model_list_response_has_models(response):
             LAST_GOOD_MODEL_LIST_RESPONSES[url] = copy.deepcopy(response)
         elif enabled and url in LAST_GOOD_MODEL_LIST_RESPONSES:
             log.warning(
-                f"Model list fetch failed for connection {idx} ({url}); "
-                "serving last-known-good model list"
+                f"Model list fetch returned no models for connection {idx} "
+                f"({url}); serving last-known-good model list"
             )
             responses[idx] = copy.deepcopy(LAST_GOOD_MODEL_LIST_RESPONSES[url])
 
