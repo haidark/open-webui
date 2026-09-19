@@ -365,6 +365,102 @@ def _model_list_response_has_models(response) -> bool:
     return False
 
 
+# --- Cross-restart persistence of the last-known-good model lists -----------
+# There is no Redis here and the data volume is recreated on each deploy, so a
+# fresh instance would start with an empty fallback cache and briefly show an
+# empty model picker until the first successful /models fetch succeeds. Persist
+# the last-known-good responses to the durable Postgres DB so restarts start
+# warm. Every operation is best-effort: a persistence failure must never break
+# model loading.
+_LAST_GOOD_HASHES: dict = {}
+_PERSIST_TABLE_READY = False
+_PERSISTED_LOADED = False
+
+
+def _ensure_model_list_cache_table() -> bool:
+    global _PERSIST_TABLE_READY
+    if _PERSIST_TABLE_READY:
+        return True
+    try:
+        from open_webui.internal.db import engine
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS model_list_cache ("
+                    "url TEXT PRIMARY KEY, response TEXT NOT NULL, "
+                    "content_hash TEXT, updated_at BIGINT)"
+                )
+            )
+        _PERSIST_TABLE_READY = True
+    except Exception as e:
+        log.warning(f"model_list_cache: could not ensure table: {e}")
+    return _PERSIST_TABLE_READY
+
+
+def load_persisted_last_good_model_lists() -> None:
+    """Warm the in-memory fallback cache from the DB. Runs once per process."""
+    global _PERSISTED_LOADED
+    if _PERSISTED_LOADED:
+        return
+    _PERSISTED_LOADED = True
+    if not _ensure_model_list_cache_table():
+        return
+    try:
+        from open_webui.internal.db import engine
+        from sqlalchemy import text
+
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT url, response, content_hash FROM model_list_cache")
+            ).fetchall()
+        for url, response, content_hash in rows:
+            try:
+                LAST_GOOD_MODEL_LIST_RESPONSES[url] = json.loads(response)
+                _LAST_GOOD_HASHES[url] = content_hash
+            except Exception:
+                continue
+        if rows:
+            log.info(f"model_list_cache: warmed {len(rows)} connection(s) from DB")
+    except Exception as e:
+        log.warning(f"model_list_cache: could not load persisted cache: {e}")
+
+
+def persist_last_good_model_list(url: str, response) -> None:
+    """Best-effort save of a connection's good /models response, when changed."""
+    try:
+        blob = json.dumps(response, sort_keys=True, default=str)
+        content_hash = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+        if _LAST_GOOD_HASHES.get(url) == content_hash:
+            return
+        if not _ensure_model_list_cache_table():
+            return
+        import time
+        from open_webui.internal.db import engine
+        from sqlalchemy import text
+
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO model_list_cache "
+                    "(url, response, content_hash, updated_at) "
+                    "VALUES (:url, :response, :hash, :ts) "
+                    "ON CONFLICT (url) DO UPDATE SET "
+                    "response = :response, content_hash = :hash, updated_at = :ts"
+                ),
+                {
+                    "url": url,
+                    "response": blob,
+                    "hash": content_hash,
+                    "ts": int(time.time()),
+                },
+            )
+        _LAST_GOOD_HASHES[url] = content_hash
+    except Exception as e:
+        log.warning(f"model_list_cache: could not persist cache for {url}: {e}")
+
+
 async def get_all_models_responses(request: Request, user: UserModel) -> list:
     if not request.app.state.config.ENABLE_OPENAI_API:
         return []
@@ -442,6 +538,7 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
     # last-known-good model list instead of dropping its models. Only cache and
     # fall back on responses that actually carry models, and only for connections
     # that are enabled (disabled ones intentionally yield None).
+    load_persisted_last_good_model_lists()  # warm from DB on first call after start
     for idx, response in enumerate(responses):
         url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
         api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
@@ -452,6 +549,7 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
 
         if _model_list_response_has_models(response):
             LAST_GOOD_MODEL_LIST_RESPONSES[url] = copy.deepcopy(response)
+            persist_last_good_model_list(url, response)
         elif enabled and url in LAST_GOOD_MODEL_LIST_RESPONSES:
             log.warning(
                 f"Model list fetch returned no models for connection {idx} "
