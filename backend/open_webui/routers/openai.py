@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -343,6 +344,13 @@ async def speech(request: Request, user=Depends(get_verified_user)):
         raise HTTPException(status_code=401, detail=ERROR_MESSAGES.OPENAI_NOT_FOUND)
 
 
+# Last successful /models response per connection URL. Used to fall back when a
+# connection intermittently times out, so a transient failure doesn't drop that
+# connection's models from every user's list (which shows up as an empty or
+# truncated model picker).
+LAST_GOOD_MODEL_LIST_RESPONSES: dict = {}
+
+
 async def get_all_models_responses(request: Request, user: UserModel) -> list:
     if not request.app.state.config.ENABLE_OPENAI_API:
         return []
@@ -414,6 +422,27 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
                 request_tasks.append(asyncio.ensure_future(asyncio.sleep(0, None)))
 
     responses = await asyncio.gather(*request_tasks)
+
+    # Resilience: if an enabled connection failed this round (send_get_request
+    # returned None on a timeout/connection error), serve its last-known-good
+    # model list instead of dropping its models. Disabled connections also yield
+    # None, so only fall back for connections that are actually enabled.
+    for idx, response in enumerate(responses):
+        url = request.app.state.config.OPENAI_API_BASE_URLS[idx]
+        api_config = request.app.state.config.OPENAI_API_CONFIGS.get(
+            str(idx),
+            request.app.state.config.OPENAI_API_CONFIGS.get(url, {}),  # Legacy
+        )
+        enabled = api_config.get("enable", True)
+
+        if response:
+            LAST_GOOD_MODEL_LIST_RESPONSES[url] = copy.deepcopy(response)
+        elif enabled and url in LAST_GOOD_MODEL_LIST_RESPONSES:
+            log.warning(
+                f"Model list fetch failed for connection {idx} ({url}); "
+                "serving last-known-good model list"
+            )
+            responses[idx] = copy.deepcopy(LAST_GOOD_MODEL_LIST_RESPONSES[url])
 
     for idx, response in enumerate(responses):
         if response:

@@ -70,6 +70,14 @@ ENV ENV=prod \
 ENV OLLAMA_BASE_URL="/ollama" \
     OPENAI_API_BASE_URL=""
 
+## Model list resilience ##
+# The default 1s cache re-fetches the model list from every connection on
+# essentially every page load, so an intermittent connection timeout empties
+# users' model pickers. Cache longer and fail a dead connection fast (the
+# last-known-good fallback in routers/openai.py covers the rest).
+ENV MODELS_CACHE_TTL="300" \
+    AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST="5"
+
 ## API Key and Security Config ##
 ENV OPENAI_API_KEY="" \
     WEBUI_SECRET_KEY="" \
